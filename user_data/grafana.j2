@@ -1,0 +1,10 @@
+#!/bin/bash
+hostname {{ aws_ec2_name }}
+echo {{ aws_ec2_name }} > /etc/hostname
+yum update -y
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+yum install vim -y
+yum install graphite-web graphite-api -y
+yum install https://s3-us-west-2.amazonaws.com/grafana-releases/release/grafana-4.6.2-1.x86_64.rpm -y
+
+

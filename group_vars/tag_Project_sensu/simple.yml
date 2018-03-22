@@ -1,0 +1,181 @@
+---
+project_name: "sensu"
+use_dns: True
+dns_domain: "level27.tech"
+include_private: True
+multi_az: False
+public_zone_key: level27-ireland-keypair
+private_zone_key: level27-ireland-keypair
+aws_access_key: "{{ ansible_access_key }}"
+aws_secret_key: "{{ ansible_secret_key }}"
+aws_region: "eu-west-1"
+
+tags:
+  Project: "{{ project_name }}"
+
+vpc_name: "vpc_{{ project_name }}"
+
+vpc_cidr_block: "10.0.8.0/21"
+vpc_cidr_for_access: "{{ ansible_my_cidr }}"
+vpc_public_subnet_1_name: "sub_public_a"
+vpc_public_subnet_1_cidr: "10.0.8.0/24"
+vpc_private_subnet_1_name: "sub_private_a"
+vpc_private_subnet_1_cidr: "10.0.9.0/24"
+vpc_public_subnet_2_name: "sub_public_b"
+vpc_public_subnet_2_cidr: "10.0.12.0/24"
+vpc_private_subnet_2_name: "sub_private_b"
+vpc_private_subnet_2_cidr: "10.0.13.0/24"
+
+sensu_host: "sensu1"
+sensu_dns_name: "{{ sensu_host }}.{{ project_name }}.{{ dns_domain }}"
+sensu_port: 4567
+sensu_proto: tcp
+sensu_subnet: "{{ vpc_private_subnet_1_name }}"
+sensu_cidr: "{{ vpc_private_subnet_1_cidr }}"
+sensu_key: "{{ private_zone_key }}"
+
+rabbitmq_host: "rabbit1"
+rabbitmq_dns_name: "{{ rabbitmq_host }}.{{ project_name }}.{{ dns_domain }}"
+rabbitmq_proto: tcp
+rabbitmq_amqp_port: 5672
+rabbitmq_mgmt_port: 15672
+rabbitmq_subnet: "{{ vpc_private_subnet_1_name }}"
+rabbitmq_cidr: "{{ vpc_private_subnet_1_cidr }}"
+rabbitmq_key: "{{ private_zone_key }}"
+rabbitmq_sensu_user: "sensu"
+rabbitmq_sensu_vhost: "/sensu"
+rabbitmq_sensu_password: "{{ sec_sensu_password }}"
+
+redis_host: "redis1"
+redis_dns_name: "{{ redis_host }}.{{ project_name }}.{{ dns_domain }}"
+redis_port: 6379
+redis_proto: tcp
+redis_subnet: "{{ vpc_private_subnet_1_name }}"
+redis_cidr: "{{ vpc_private_subnet_1_cidr }}"
+redis_key: "{{ private_zone_key }}"
+
+web_host: "web1"
+web_subnet: "{{ vpc_public_subnet_1_name }}"
+web_cidr: "{{ vpc_public_subnet_1_cidr }}"
+web_key: "{{ public_zone_key }}"
+
+uchiwa_host: "{{ web_host }}"
+uchiwa_port: 3000
+uchiwa_proto: tcp
+
+grafana_host: "{{ web_host }}"
+grafana_port: 8080
+grafana_proto: tcp
+
+security_groups:
+  - name: sg_redis
+    description: "Controls access for redis servers"
+    rules:
+    - proto: "{{ redis_proto }}"
+      from_port: "{{ redis_port }}"
+      to_port: "{{ redis_port }}"
+      cidr_ip: "{{ redis_cidr }}"
+  - name: sg_rabbitmq_amqp
+    description: "Controls access for RabbitMQ servers"
+    rules:
+    - proto: "{{ rabbitmq_proto }}"
+      from_port: "{{ rabbitmq_amqp_port }}"
+      to_port: "{{ rabbitmq_amqp_port }}"
+      cidr_ip: "{{ vpc_public_subnet_1_cidr }}"
+    - proto: "{{ rabbitmq_proto }}"
+      from_port: "{{ rabbitmq_amqp_port }}"
+      to_port: "{{ rabbitmq_amqp_port }}"
+      cidr_ip: "{{ vpc_private_subnet_1_cidr }}"
+  - name: sg_rabbitmq_management
+    description: "Controls access to RabbitMQ Management Console"
+    rules:
+    - proto: "{{ rabbitmq_proto }}"
+      from_port: "{{ rabbitmq_mgmt_port }}"
+      to_port: "{{ rabbitmq_mgmt_port }}"
+      cidr_ip: "{{ vpc_public_subnet_1_cidr }}"
+  - name: sg_uchiwa
+    description: "Controls access for Uchiwa"
+    rules:
+    - proto: "{{ uchiwa_proto }}"
+      from_port: "{{ uchiwa_port }}"
+      to_port: "{{ uchiwa_port }}"
+      cidr_ip: "{{ vpc_cidr_for_access }}"
+  - name: sg_sensu
+    description: "Controls access for Sensu"
+    rules:
+    - proto: "{{ sensu_proto }}"
+      from_port: "{{ sensu_port }}"
+      to_port: "{{ sensu_port }}"
+      cidr_ip: "{{ vpc_public_subnet_1_cidr }}"
+  - name: sg_grafana
+    description: "Controls access for Grafana"
+    rules:
+    - proto: "{{ grafana_proto }}"
+      from_port: "{{ grafana_port }}"
+      to_port: "{{ grafana_port }}"
+      cidr_ip: "{{ vpc_cidr_for_access }}"
+
+ec2_instances:
+  - name: jumpbox
+    type: t2.micro
+    subnet: "{{ vpc_public_subnet_1_name }}"
+    key: "{{ public_zone_key }}"
+    image: ami-bb9a6bc2
+    security_groups:
+    - sg_external_secure_shell
+    - sg_sub_public_a_secure_shell
+    ansible_groups:
+    - jumpbox
+    user_data: "user_data/jumpbox.j2"
+  - name: "{{ rabbitmq_host }}"
+    type: t2.micro
+    subnet: "{{ rabbitmq_subnet }}"
+    key: "{{ rabbitmq_key }}"
+    image: ami-bb9a6bc2
+    security_groups:
+    - sg_private_secure_shell
+    - sg_rabbitmq_amqp
+    - sg_rabbitmq_management
+    ansible_groups:
+    - rabbitmq
+    - sensu_client
+    user_data: "user_data/rabbitmq.j2"
+  - name: "{{ sensu_host }}"
+    type: t2.micro
+    subnet: "{{ sensu_subnet }}"
+    key: "{{ sensu_key }}"
+    image: ami-bb9a6bc2
+    security_groups:
+    - sg_private_secure_shell
+    - sg_sensu
+    ansible_groups:
+    - sensuserver
+    - sensu_client
+    user_data: "user_data/sensu.j2"
+  - name: "{{ redis_host }}"
+    type: t2.micro
+    subnet: "{{ redis_subnet }}"
+    key: "{{ redis_key }}"
+    image: ami-bb9a6bc2
+    security_groups:
+    - sg_private_secure_shell
+    - sg_redis
+    ansible_groups:
+    - redis
+    - sensu_client
+    user_data: "user_data/redis.j2"
+  - name: "{{ web_host }}"
+    type: t2.micro
+    subnet: "{{ web_subnet }}"
+    key: "{{ web_key }}"
+    image: ami-bb9a6bc2
+    security_groups:
+    - sg_private_secure_shell
+    - sg_uchiwa
+    - sg_grafana
+    ansible_groups:
+    - uchiwa
+    - grafana
+    - sensu_client
+    user_data: "user_data/uchiwa.j2"
+

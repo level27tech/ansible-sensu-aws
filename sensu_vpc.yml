@@ -1,0 +1,155 @@
+---
+
+#
+# VPC
+#
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+  - name: Create the VPC
+    include_role:
+      name: level27tech.aws_vpc
+    vars:
+      aws_vpc_include_private: "{{ include_private }}"
+      aws_vpc_create_dns_zone: "{{ use_dns }}"
+      aws_vpc_multi_az: "{{ multi_az }}"
+      aws_vpc_dns_domain: "{{ dns_domain }}"
+      aws_vpc_tag_project: "{{ project_name }}"
+      aws_vpc_aws_access_key: "{{ aws_access_key }}"
+      aws_vpc_aws_secret_key: "{{ aws_secret_key }}"
+      aws_vpc_aws_region: "{{ aws_region }}"
+      aws_vpc_vpc_name: "{{ vpc_name }}"
+      aws_vpc_vpc_cidr_block: "{{ vpc_cidr_block }}"
+      aws_vpc_cidr_for_access: "{{ vpc_cidr_for_access }}"
+      aws_vpc_public_subnet_1_name: "{{ vpc_public_subnet_1_name }}"
+      aws_vpc_public_subnet_1_cidr: "{{ vpc_public_subnet_1_cidr }}"
+      aws_vpc_private_subnet_1_name: "{{ vpc_private_subnet_1_name }}"
+      aws_vpc_private_subnet_1_cidr: "{{ vpc_private_subnet_1_cidr }}"
+      aws_vpc_public_subnet_2_name: "{{ vpc_public_subnet_2_name }}"
+      aws_vpc_public_subnet_2_cidr: "{{ vpc_public_subnet_2_cidr }}"
+      aws_vpc_private_subnet_2_name: "{{ vpc_private_subnet_2_name }}"
+      aws_vpc_private_subnet_2_cidr: "{{ vpc_private_subnet_2_cidr }}"
+
+#
+# SECURITY GROUPS
+#
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+  - name: Get VPC information
+    ec2_vpc_net_facts:
+      region:           "{{ aws_region }}"
+      aws_access_key:   "{{ aws_access_key }}"
+      aws_secret_key:   "{{ aws_secret_key }}"
+      filters:
+        "tag:Name": "{{ vpc_name }}"
+    register: vpc_facts
+
+  - name: Set VPC ID as a fact
+    set_fact:
+      vpc_id: "{{ vpc_facts.vpcs.0.id }}"
+
+  - name: Create the security groups
+    ec2_group:
+      region:           "{{ aws_region }}"
+      aws_access_key:   "{{ aws_access_key }}"
+      aws_secret_key:   "{{ aws_secret_key }}"
+      state:            "present"
+      vpc_id:           "{{ vpc_id }}"
+      name:             "{{ item.name }}"
+      description:      "{{ item.description }}"
+      rules: "{{ item.rules }}"
+      tags:
+        Name: "{{ item.name }}"
+        Project: "{{ project_name }}"
+    with_items: "{{ security_groups }}"
+
+#
+# NETWORK ACLS
+#
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+  - name: Set facts for private subnet 1 rules
+    set_fact:
+      private_subnet_1_ingress_rule:
+      - [500,'tcp','allow','{{ vpc_private_subnet_1_cidr }}', null, null, 1024, 65535]
+      private_subnet_1_egress_rule:
+      - "[500,'tcp','allow','{{ vpc_private_subnet_1_cidr }}', null, null, {{ sensu_port }}, {{ sensu_port }}]"
+    when: include_private == True
+
+  - name: Set fact for private subnet 2 rules
+    set_fact:
+      private_subnet_2_ingress_rule:
+      - [600,'tcp','allow','{{ vpc_private_subnet_2_cidr }}', null, null, 1024, 65535]
+      private_subnet_2_egress_rule:
+      - "[600,'tcp','allow','{{ vpc_private_subnet_2_cidr }}', null, null, {{ sensu_port }}, {{ sensu_port }}]"
+    when: include_private == True and
+          multi_az == True
+
+  - name: Set fact for public rules
+    set_fact:
+      public_subnet_ingress_rule:
+      - "[400,'tcp','allow','{{ vpc_cidr_for_access }}', null, null, {{ uchiwa_port }}, {{ uchiwa_port }}]"
+      - "[410,'tcp','allow','{{ vpc_cidr_for_access }}', null, null, {{ grafana_port }}, {{ grafana_port }}]"
+      public_subnet_egress_rule: []
+  - name: Update Network ACL
+    include_role:
+      name: level27tech.aws_nacl
+    vars:
+      aws_nacl_aws_access_key: "{{ aws_access_key }}"
+      aws_nacl_aws_secret_key: "{{ aws_secret_key }}"
+      aws_nacl_region: "{{ aws_region }}"
+      aws_nacl_name: "acl_public"
+      aws_nacl_vpc_name: "{{ vpc_name }}"
+      aws_nacl_tags: "{{ tags }}"
+      aws_nacl_project: "{{ project_name }}"
+      aws_nacl_purge_subnets: False
+      aws_nacl_purge_ingress_rules: False
+      aws_nacl_purge_egress_rules: False
+      aws_nacl_ingress_rules: "{{ public_subnet_ingress_rule | default ([]) }} +
+                 {{ private_subnet_1_ingress_rule | default([]) }} +
+                 {{ private_subnet_2_ingress_rule | default([]) }}"
+      aws_nacl_egress_rules: "{{ public_subnet_egress_rule | default ([]) }} +
+                 {{ private_subnet_1_egress_rule | default([]) }} +
+                 {{ private_subnet_2_egress_rule | default([]) }}"
+
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+  - name: set ACL rule facts
+    set_fact:
+      acl_ingress:
+     # rule no, proto, allow/deny, cidr, icmp_code, icmp_type, port from, port to
+      - "[200,'tcp','allow','{{ vpc_public_subnet_1_cidr }}',null,null,{{ sensu_port }},{{ sensu_port }}]"
+      acl_egress: []
+
+  - name: Set ACL rule facts for multi-AZ
+    set_fact:
+     # rule no, proto, allow/deny, cidr, icmp_code, icmp_type, port from, port to
+      acl_ingress: "{{ acl_ingress }} +
+      [[600,'tcp','allow','{{ vpc_public_subnet_2_cidr }}',null,null,{{ sensu_port }},{{ sensu_port }}]"
+      acl_egress: []
+    when: multi_az == True
+
+  - name: Update Network ACL
+    include_role:
+      name: level27tech.aws_nacl
+    vars:
+      aws_nacl_aws_access_key: "{{ aws_access_key }}"
+      aws_nacl_aws_secret_key: "{{ aws_secret_key }}"
+      aws_nacl_region: "{{ aws_region }}"
+      aws_nacl_name: "acl_private"
+      aws_nacl_vpc_name: "{{ vpc_name }}"
+      aws_nacl_project: "{{ project_name }}"
+      aws_nacl_tags: "{{ tags }}"
+      aws_nacl_purge_subnets: False
+      aws_nacl_purge_ingress_rules: False
+      aws_nacl_purge_egress_rules: False
+      aws_nacl_ingress_rules: "{{ acl_ingress | default ([]) }}"
+      aws_nacl_egress_rules: "{{ acl_egress | default ([]) }}"
+

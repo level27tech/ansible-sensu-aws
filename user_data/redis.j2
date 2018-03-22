@@ -1,0 +1,12 @@
+#!/bin/bash
+hostname {{ aws_ec2_name }}
+echo {{ aws_ec2_name }} > /etc/hostname
+yum update -y
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+yum install vim -y
+yum install redis -y
+systemctl stop redis
+local_ip=`curl -s http://169.254.169.254/latest/meta-data/local-ipv4`
+sed -i "s/^bind .*$/bind ${local_ip}/" /etc/redis.conf
+systemctl enable redis
+systemctl start redis

@@ -1,0 +1,33 @@
+#!/bin/bash
+{% if aws_ec2_name is defined %}
+hostname {{ aws_ec2_name }}
+echo {{ aws_ec2_name }} > /etc/hostname
+{% endif %}
+yum update -y
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+yum install vim -y
+yum install rabbitmq-server -y
+rabbitmq-plugins enable rabbitmq-management
+systemctl stop rabbitmq-server
+local_ip=`curl -s http://169.254.169.254/latest/meta-data/local-ipv4`
+cat <<EOT > /etc/rabbitmq/rabbitmq.config
+[
+ {rabbit,
+  [
+  {tcp_listeners, [{"${local_ip}",5672}]},
+   {log_levels, [{connection, info}, {channel, info}]},
+   {loopback_users, []},
+   {auth_mechanisms, ['PLAIN', 'AMQPLAIN']},
+   {default_vhost,       <<"/">>},
+   {default_user,        <<"guest">>},
+   {default_pass,        <<"guest">>},
+   {default_permissions, [<<".*">>, <<".*">>, <<".*">>]},
+   {default_user_tags, [administrator]}
+  ]}
+].
+EOT
+systemctl start rabbitmq-server
+systemctl enable rabbitmq-server
+rabbitmqctl add_vhost {{ rabbitmq_sensu_vhost }}
+rabbitmqctl add_user {{ rabbitmq_sensu_user }} {{ rabbitmq_sensu_password }}
+rabbitmqctl set_permissions -p {{ rabbitmq_sensu_vhost }} {{ rabbitmq_sensu_user }} ".*" ".*" ".*"

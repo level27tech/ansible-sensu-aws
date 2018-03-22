@@ -1,0 +1,39 @@
+#!/bin/bash
+hostname {{ aws_ec2_name }}
+echo {{ aws_ec2_name }} > /etc/hostname
+yum update -y
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+yum install vim -y
+echo '[sensu]
+name=Sensu
+baseurl=https://sensu.global.ssl.fastly.net/yum/$releasever/$basearch/
+gpgcheck=0
+enabled=1' > /etc/yum.repos.d/sensu.repo
+
+yum install uchiwa -y
+systemctl stop uchiwa
+
+cat <<EOT > /etc/sensu/uchiwa.json
+{
+  "sensu": [
+    {
+      "name": "SensuServer",
+      "host": "{{ sensu_dns_name }}",
+      "port": {{ sensu_port }},
+      "ssl": false,
+      "path": "",
+      "user": "{{ rabbitmq_sensu_user }}",
+      "pass": "{{ rabbitmq_sensu_password }}",
+      "timeout": 5
+    }
+  ],
+  "uchiwa": {
+    "host": "0.0.0.0",
+    "port": {{ uchiwa_port }},
+    "interval": 5
+  }
+}
+EOT
+systemctl start uchiwa
+systemctl enable uchiwa
+

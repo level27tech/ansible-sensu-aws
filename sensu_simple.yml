@@ -1,0 +1,3 @@
+---
+- import_playbook: sensu_vpc.yml
+- import_playbook: sensu_servers.yml

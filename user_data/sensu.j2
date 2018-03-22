@@ -1,0 +1,40 @@
+#!/bin/bash
+{% if aws_ec2_name is defined %}
+hostname {{ aws_ec2_name }}
+echo {{ aws_ec2_name }} > /etc/hostname
+{% endif %}
+yum update -y
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
+yum install vim -y
+echo '[sensu]
+name=Sensu
+baseurl=https://sensu.global.ssl.fastly.net/yum/$releasever/$basearch/
+gpgcheck=0
+enabled=1' > /etc/yum.repos.d/sensu.repo
+yum install sensu -y
+
+systemctl stop sensu-server
+systemctl stop sensu-api
+cat <<EOT > /etc/sensu/config.json
+{
+  "rabbitmq": {
+    "host": "{{ rabbitmq_dns_name }}",
+    "port": {{ rabbitmq_amqp_port }},
+    "vhost": "{{ rabbitmq_sensu_vhost }}",
+    "user": "{{ rabbitmq_sensu_user }}",
+    "password": "{{ rabbitmq_sensu_password }}"
+  },
+  "redis": {
+    "host": "{{ redis_dns_name }}",
+    "Port": {{ redis_port }}
+  },
+  "api": {
+    "host": "127.0.0.1",
+    "port": {{ sensu_port }}
+  }
+}
+EOT
+systemctl start sensu-server
+systemctl start sensu-api
+systemctl enable sensu-server
+systemctl enable sensu-api
